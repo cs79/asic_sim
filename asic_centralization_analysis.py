@@ -4,6 +4,7 @@
 # Imports #
 #=========#
 
+import pandas as pd
 import numpy as np
 
 
@@ -173,15 +174,27 @@ run this simulation across a grid of parameters for differing distributions / ha
 '''
 
 asics, gpus = sample_initial_pop(0.1, 0.3, 0.6, 1000000)
+miners = asics + gpus
 
 # purchase hardware and calculate hashpower
-for a in asics:
+for m in miners:
     allocation = np.random.uniform(0,1)  # just to get a number for now
-    a.purchase_hardware(p_g, p_a, allocation)
-    a.calculate_hashpower(g_hr, a_hr)
-for g in gpus:
-    allocation = np.random.uniform(0,1)
-    g.purchase_hardware(p_g, p_a, allocation)
-    g.calculate_hashpower(g_hr, a_hr)
+    m.purchase_hardware(p_g, p_a, allocation)
+    m.calculate_hashpower(g_hr, a_hr)
 
 # calculate concentration under assumption of all particpating, or sample participating
+def get_concentration(miners):
+    # miners should be a list of Miner objects
+    hps = pd.DataFrame({'hashpower': [m.hashpower for m in miners]}, \
+                       index=[m.id for m in miners])
+    hps.sort_values(by='hashpower', ascending=False, inplace=True)
+    hps['cumpct_hp'] = hps['hashpower'].cumsum() / hps['hashpower'].sum()
+    hps['cumpct_m'] = [i / len(hps) for i in list(range(len(hps)))]
+    cumpct = hps[['cumpct_m', 'cumpct_hp']]
+    cumpct.set_index('cumpct_m', inplace=True)  # maybe
+    simple = pd.DataFrame()
+    for i in [j/100 for j in list(range(1,100))]:
+        simple.loc[i, 'cumpct_hp'] = cumpct.loc[i, 'cumpct_hp']
+    return simple
+
+# run get_concentration on various parameterizations / averages across samplings of the same parmeterization i guess, and then combine them into surfaces of mining concentration based on changes in those parameters (average scenario per parameterization makes the most sense, I guess)
