@@ -133,7 +133,8 @@ class Miner:
         if self.access == 'ASIC':
             self.hashpower = self.hardware_units * asic_hashrate
 
-def sample_initial_pop(aa, ag, an, pop_n):
+# TODO: consider why exactly we are hardcoding the capital distributions here, in the manner they are hardcoded
+def sample_initial_pop(aa, ag, an, pop_n, gpu_price, asic_price, max_cap_a):
     '''
     For a specified population size and breakdown by access to miners, samples capital distributions of miners.
     '''
@@ -148,14 +149,16 @@ def sample_initial_pop(aa, ag, an, pop_n):
         # use a beta distribution for now; no real justification for this
         mid = str(gid).zfill(len(str(pop_n)))
         AA.add(Miner(id=mid, access='ASIC', \
-                     capital=get_beta(2, 3 ,p_a, max_cap_a)))  # DO NOT HARDCODE THIS
+                     capital=get_beta(2, 3, asic_price, max_cap_a)))  # DO NOT HARDCODE a AND b HERE
         i += 1
         gid += 1
     for i in range(ag_n):
         mid = str(gid).zfill(len(str(pop_n)))
-        AG.add(Miner(id=mid, access='GPU', capital=get_uniform(p_g, p_a)))
+        AG.add(Miner(id=mid, access='GPU', \
+                     capital=get_uniform(gpu_price, asic_price)))
         i += 1
         gid += 1
+    # TODO: make this return a dict w/ ids as keys so I can sim and easily aggregate simulated capital across instances of the same ID (maybe)
     return list(AA), list(AG)
 
 #============#
@@ -173,6 +176,7 @@ Simulation might proceeed something like as follows:
 run this simulation across a grid of parameters for differing distributions / hashrate indices / participation rates and see if there is a way to cleanly visualize the results (can use multiple graphs as needed)
 '''
 
+'''
 asics, gpus = sample_initial_pop(0.1, 0.3, 0.6, 1000000)
 miners = asics + gpus
 
@@ -181,6 +185,7 @@ for m in miners:
     allocation = np.random.uniform(0,1)  # just to get a number for now
     m.purchase_hardware(p_g, p_a, allocation)
     m.calculate_hashpower(g_hr, a_hr)
+'''
 
 # calculate concentration under assumption of all particpating, or sample participating
 def get_concentration(miners):
@@ -198,3 +203,96 @@ def get_concentration(miners):
     return simple
 
 # run get_concentration on various parameterizations / averages across samplings of the same parmeterization i guess, and then combine them into surfaces of mining concentration based on changes in those parameters (average scenario per parameterization makes the most sense, I guess)
+
+def run_sim(n=10000, alloc='uniform', avg_result=True, **kwargs):
+    '''
+    '''
+    tr =[]
+    gpu_price = kwargs.get('gpu_price')
+    asic_price = kwargs.get('asic_price')
+    for i in range(n):
+        a, g = sample_initial_pop(aa=kwargs.get('aa'), ag=kwargs.get('ag'), \
+                                  an=kwargs.get('an'), \
+                                  pop_n=kwargs.get('pop_n'), \
+                                  gpu_price=gpu_price, asic_price=asic_price, \
+                                  max_cap_a=kwargs.get('max_cap_a'))
+        if i % 100 == 0:
+            print('sampled pop for run {}'.format(i))
+        miners = a + g
+        for m in miners:
+            if alloc == 'uniform':
+                alloc = np.random.uniform(0,1)  # change this later
+            m.purchase_hardware(gpu_price=gpu_price, asic_price=asic_price, \
+                                allocation=alloc)
+            m.calculate_hashpower(gpu_hashrate=kwargs.get('gpu_hashrate'), \
+                                  asic_hashrate=kwargs.get('asic_hashrate'))
+        if i % 100 == 0:
+            print('allocated capital to hardware for run {}'.format(i))
+        tr.append(get_concentration(miners))
+        if i % 100 == 0:
+            print('calculated miner concentration for run {}'.format(i))
+        i += 1
+    if avg_result:
+        sims = pd.DataFrame(index=tr[0].index)
+        j = 1
+        for s in tr:
+            sims = sims.join(s.rename(columns=lambda x: x + '_{}'.format(j)), \
+                             how='outer')
+            j += 1
+        tr = sims.mean(1)
+    return tr
+
+testsim = run_sim(n=1000, aa=0.1, ag=0.3, an=0.6, pop_n=100000, gpu_price=p_g, asic_price=p_a, max_cap_a=max_cap_a, gpu_hashrate=g_hr, asic_hashrate=a_hr)
+
+'''
+sims = pd.DataFrame(index=testsim[0].index)
+i = 1
+for s in testsim:
+    sims = sims.join(s.rename(columns=lambda x: x + '_{}'.format(i)), \
+                     how='outer')
+    i += 1
+'''
+
+# knobs to tune here: aa / ag, a_hr (indexed), p_g, p_a, max_cap_a
+def panel_sim(p=[], which=None, **kwargs):
+    '''
+    '''
+    w = ('aas', 'ags', 'a_hrs', 'p_gs', 'p_as', 'mc_as')
+    assert which in w, 'which must be one of {}'.format(w)
+    assert type(p) == list, 'p must be a list of values to run a panel over'
+    assert p, 'p must not be empty'
+    # unpack sim kwargs
+    n               = kwargs.get('n', None)
+    alloc           = kwargs.get('alloc', None)
+    avg_result      = True  # forced for this case
+    aa              = kwargs.get('aa', None)
+    ag              = kwargs.get('ag', None)
+    an              = kwargs.get('an', None)
+    pop_n           = kwargs.get('pop_n', None)
+    gpu_price       = kwargs.get('gpu_price', None)
+    asic_price      = kwargs.get('asic_price', None)
+    max_cap_a       = kwargs.get('max_cap_a', None)
+    gpu_hashrate    = kwargs.get('gpu_hashrate', None)
+    asic_hashrate   = kwargs.get('asic_hashrate', None)
+
+    tr = pd.DataFrame()
+
+    # big dumb switch for now until I can figure out a clever way to do this
+    if which == 'aas':
+        for i in p:
+            sim = run_sim(n=n, alloc=alloc, aa=i, ag=ag, an=an, pop_n=pop_n, \
+                          gpu_price=gpu_price, asic_price=asic_price, \
+                          max_cap_a=max_cap_a, gpu_hashrate=gpu_hashrate, \
+                          asic_hashrate=asic_hashrate)
+            tr = tr.join(sim.rename(columns=lambda x: \
+                                    x + '_aa_{}'.format(i)), how='outer')
+            print('Ran sim for {} - value {}'.format(which, i))
+    # etc.
+    #if which == '':
+
+    return tr
+
+def recalc_pcts(aa, ag, an):
+    '''
+    Recalculate population percentages to keep combined split at 100%.
+    '''
