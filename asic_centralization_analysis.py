@@ -233,13 +233,16 @@ def run_sim(n=10000, alloc='uniform', avg_result=True, **kwargs):
             print('calculated miner concentration for run {}'.format(i))
         i += 1
     if avg_result:
+        nm = tr[0].columns[0]
         sims = pd.DataFrame(index=tr[0].index)
         j = 1
         for s in tr:
             sims = sims.join(s.rename(columns=lambda x: x + '_{}'.format(j)), \
                              how='outer')
             j += 1
-        tr = sims.mean(1)
+        sims = sims.mean(1)
+        sims.name = nm
+        tr = sims.to_frame()
     return tr
 
 testsim = run_sim(n=1000, aa=0.1, ag=0.3, an=0.6, pop_n=100000, gpu_price=p_g, asic_price=p_a, max_cap_a=max_cap_a, gpu_hashrate=g_hr, asic_hashrate=a_hr)
@@ -280,6 +283,8 @@ def panel_sim(p=[], which=None, **kwargs):
     # big dumb switch for now until I can figure out a clever way to do this
     if which == 'aas':
         for i in p:
+            # keep ag value constant
+            aa, ag, an = recalc_pcts(aa=i, ag=ag)
             sim = run_sim(n=n, alloc=alloc, aa=i, ag=ag, an=an, pop_n=pop_n, \
                           gpu_price=gpu_price, asic_price=asic_price, \
                           max_cap_a=max_cap_a, gpu_hashrate=gpu_hashrate, \
@@ -292,7 +297,43 @@ def panel_sim(p=[], which=None, **kwargs):
 
     return tr
 
-def recalc_pcts(aa, ag, an):
+testpanel = panel_sim(p=[0.01, 0.05, 0.1, 0.15, 0.2, 0.25], which='aas', n=1000, alloc='uniform', aa=0.1, ag=0.3, an=0.6, pop_n=100000, gpu_price=p_g, asic_price=p_a, max_cap_a=max_cap_a, gpu_hashrate=g_hr, asic_hashrate=a_hr)
+
+testpanel.to_csv('C:/Users/cloud/Desktop/testpanel.csv')
+# need to reshape this to something that can be plotted easily in 3D
+
+# there is a less dumb way to do this, but this should work OK
+def recalc_pcts(aa=None, ag=None, an=None):
     '''
     Recalculate population percentages to keep combined split at 100%.
     '''
+    bits = [1 if i is not None else 0 for i in [aa, ag, an]]
+    assert sum(bits) < 3
+    # check individual cases:
+    if sum(bits) == 1:
+        if aa is not None:
+            assert aa <= 1
+            ag = an = (1 - aa) / 2  # split remainder evenly, I guess
+            return aa, ag, an
+        if ag is not None:
+            assert ag <= 1
+            aa = an = (1 - ag) / 2
+            return aa, ag, an
+        if an is not None:
+            assert an <= 1
+            aa = ag = (1 - an) / 2
+            return aa, ag, an
+    # check double cases
+    if sum(bits) == 2:
+        if aa is not None and ag is not None:
+            assert (aa + ag) <= 1
+            an = 1 - (aa + ag)
+            return aa, ag, an
+        if aa is not None and an is not None:
+            assert (aa + an) <= 1
+            ag = 1 - (aa + an)
+            return aa, ag, an
+        if ag is not None and an is not None:
+            assert (ag + an) <= 1
+            aa = 1 - (ag + an)
+            return aa, ag, an
