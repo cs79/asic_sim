@@ -299,8 +299,47 @@ def panel_sim(p=[], which=None, **kwargs):
 
 testpanel = panel_sim(p=[0.01, 0.05, 0.1, 0.15, 0.2, 0.25], which='aas', n=1000, alloc='uniform', aa=0.1, ag=0.3, an=0.6, pop_n=100000, gpu_price=p_g, asic_price=p_a, max_cap_a=max_cap_a, gpu_hashrate=g_hr, asic_hashrate=a_hr)
 
+testpanel2 = panel_sim(p=[0.01, 0.05, 0.1, 0.15, 0.2, 0.25], which='aas', n=500, alloc='uniform', aa=0.1, ag=0.3, an=0.6, pop_n=10000, gpu_price=p_g, asic_price=p_a, max_cap_a=max_cap_a, gpu_hashrate=g_hr, asic_hashrate=a_hr)
+
 testpanel.to_csv('C:/Users/cloud/Desktop/testpanel.csv')
 # need to reshape this to something that can be plotted easily in 3D
+d = {}
+suf = ['0.01', '0.05', '0.1', '0.15', '0.2', '0.25']
+for s in suf:
+    d[float(s)] = testpanel[[col for col in testpanel if col.endswith(s)]]
+    # this doesn't actually help - no .plot() method for panels
+
+surf = pd.DataFrame()
+x = [0.01, 0.05, 0.1, 0.15, 0.2, 0.25]
+'''
+y = list(testpanel.index)
+j = 0
+for xi in x:
+    for yi in y:
+        z = testpanel[[col for col in testpanel if col.endswith(str(xi))]]
+        z = list(z[z.columns[0]].values)
+        for zi in z:
+            surf.loc[j, 'x'] = xi
+            surf.loc[j, 'y'] = yi
+            surf.loc[j, 'z'] = zi
+            j += 1
+'''
+for xi in x:
+    col = [col for col in testpanel if col.endswith(str(xi))]
+    temp = testpanel[col]
+    temp['x'] = temp.index
+    temp['y'] = xi
+    temp.rename(columns={col[0]: 'z'}, inplace=True)
+    temp.index = range(len(temp))
+    surf = surf.append(temp)
+
+
+from mpl_toolkits.mplot3d import Axes3D
+from matplotlib import cm
+fig = plt.figure()
+ax = Axes3D(fig)
+test = ax.plot_trisurf(surf['x'], surf['y'], surf['z'], cmap=cm.jet, linewidth=0.2)
+# what this seems to show is that if NOBODY has an ASIC, decentralization is "better" (whatever that means), but if ANYONE has an ASIC, decentralization "improves" the more that other miners also have them
 
 # there is a less dumb way to do this, but this should work OK
 def recalc_pcts(aa=None, ag=None, an=None):
