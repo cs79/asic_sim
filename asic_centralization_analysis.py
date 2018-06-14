@@ -6,6 +6,8 @@
 
 import pandas as pd
 import numpy as np
+from mpl_toolkits.mplot3d import Axes3D
+from matplotlib import cm
 
 
 #===========#
@@ -43,8 +45,6 @@ ag = 0.3  # percentage of non-miners who could access GPUs
 an = 0.6  # percentage of non-miners who could access neither ASICs nor GPUs
 assert aa + ag + an == 1
 
-
-
 # N.B. hashrates can be indexed rather than real rates
 a_hr = 250  # ASIC hashrate - placeholder, not realistic
 g_hr = 100  # GPU hashrate
@@ -68,17 +68,10 @@ p_g = 600
 max_cap_a = 100000
 max_cap_g = p_a - 1
 
-# Capital Distributions
-cd_a = np.linspace(p_a, max_cap_a)
-# lay a distribution over these values - left skewed
-cd_g = np.linspace(p_g, max_cap_g)
-# lay a distribution over these values - possibly uniform
 
-# these seem kinda unnecessary now...
-def get_beta(a, b, low, high):
-    return np.random.beta(a, b) * (high - low)
-def get_uniform(low, high):
-    return np.random.uniform(low=low, high=high)
+#=========#
+# Classes #
+#=========#
 
 class Miner:
     def __init__(self, **kwargs):
@@ -133,6 +126,23 @@ class Miner:
         if self.access == 'ASIC':
             self.hashpower = self.hardware_units * asic_hashrate
 
+
+#===========#
+# Functions #
+#===========#
+
+def get_beta(a, b, low, high):
+    '''
+    Helper function used by simulation to sample ASIC miners.
+    '''
+    return np.random.beta(a, b) * (high - low)
+
+def get_uniform(low, high):
+    '''
+    Helper function used by simulation to sample GPU miners.
+    '''
+    return np.random.uniform(low=low, high=high)
+
 # TODO: consider why exactly we are hardcoding the capital distributions here, in the manner they are hardcoded
 def sample_initial_pop(aa, ag, an, pop_n, gpu_price, asic_price, max_cap_a):
     '''
@@ -161,34 +171,12 @@ def sample_initial_pop(aa, ag, an, pop_n, gpu_price, asic_price, max_cap_a):
     # TODO: make this return a dict w/ ids as keys so I can sim and easily aggregate simulated capital across instances of the same ID (maybe)
     return list(AA), list(AG)
 
-#============#
-# Simulation #
-#============#
-
-'''
-Simulation might proceeed something like as follows:
-
-- sample capital distributions for all nodes in AA, AG
-- sample initially participating miners to get M = A + G
-- calculate hashpower per miner based on allocated capital (either use full distribution from step 1, or sample capital commitment within allowable bounds, e.g. a node selected for set A must commit enough capital to buy at least 1 ASIC)
-- calculate an HHI-style scale of % of nodes controlling % of hashpower
-
-run this simulation across a grid of parameters for differing distributions / hashrate indices / participation rates and see if there is a way to cleanly visualize the results (can use multiple graphs as needed)
-'''
-
-'''
-asics, gpus = sample_initial_pop(0.1, 0.3, 0.6, 1000000)
-miners = asics + gpus
-
-# purchase hardware and calculate hashpower
-for m in miners:
-    allocation = np.random.uniform(0,1)  # just to get a number for now
-    m.purchase_hardware(p_g, p_a, allocation)
-    m.calculate_hashpower(g_hr, a_hr)
-'''
-
 # calculate concentration under assumption of all particpating, or sample participating
+# TODO: fix this - does not work for some values
 def get_concentration(miners):
+    '''
+    Calculates cumulative percentage of miners that control cumulative percentage of network hashpower.
+    '''
     # miners should be a list of Miner objects
     hps = pd.DataFrame({'hashpower': [m.hashpower for m in miners]}, \
                        index=[m.id for m in miners])
@@ -196,11 +184,24 @@ def get_concentration(miners):
     hps['cumpct_hp'] = hps['hashpower'].cumsum() / hps['hashpower'].sum()
     hps['cumpct_m'] = [i / len(hps) for i in list(range(len(hps)))]
     cumpct = hps[['cumpct_m', 'cumpct_hp']]
-    cumpct.set_index('cumpct_m', inplace=True)  # maybe
+    #cumpct.set_index('cumpct_m', inplace=True)  # maybe
     simple = pd.DataFrame()
-    for i in [j/100 for j in list(range(1,100))]:
-        simple.loc[i, 'cumpct_hp'] = cumpct.loc[i, 'cumpct_hp']
+    # approximation rather than relying on calculation of exact pcts
+    grid = [i/100 for i in list(range(1,100))] + [1.0]
+    j = 0
+    for i in range(len(cumpct)):
+        pct_m = cumpct['cumpct_m'][i]
+        if pct_m < grid[j]:
+            i += 1
+        else:
+            #print('i: {}\n\nj: {}'.format(i, j))
+            simple.loc[grid[j], 'cumpct_hp'] = cumpct.loc[cumpct.index[i], 'cumpct_hp']
+            j += 1
+    #for i in [j/100 for j in list(range(1,100))]:
+    #    simple.loc[i, 'cumpct_hp'] = cumpct.loc[i, 'cumpct_hp']
     return simple
+
+
 
 # run get_concentration on various parameterizations / averages across samplings of the same parmeterization i guess, and then combine them into surfaces of mining concentration based on changes in those parameters (average scenario per parameterization makes the most sense, I guess)
 
@@ -245,17 +246,6 @@ def run_sim(n=10000, alloc='uniform', avg_result=True, **kwargs):
         tr = sims.to_frame()
     return tr
 
-testsim = run_sim(n=1000, aa=0.1, ag=0.3, an=0.6, pop_n=100000, gpu_price=p_g, asic_price=p_a, max_cap_a=max_cap_a, gpu_hashrate=g_hr, asic_hashrate=a_hr)
-
-'''
-sims = pd.DataFrame(index=testsim[0].index)
-i = 1
-for s in testsim:
-    sims = sims.join(s.rename(columns=lambda x: x + '_{}'.format(i)), \
-                     how='outer')
-    i += 1
-'''
-
 # knobs to tune here: aa / ag, a_hr (indexed), p_g, p_a, max_cap_a
 def panel_sim(p=[], which=None, **kwargs):
     '''
@@ -283,8 +273,8 @@ def panel_sim(p=[], which=None, **kwargs):
     # big dumb switch for now until I can figure out a clever way to do this
     if which == 'aas':
         for i in p:
-            # keep ag value constant
-            aa, ag, an = recalc_pcts(aa=i, ag=ag)
+            # keep an value constant (at 0) - eventually factor an out
+            aa, ag, an = recalc_pcts(aa=i, an=an)
             sim = run_sim(n=n, alloc=alloc, aa=i, ag=ag, an=an, pop_n=pop_n, \
                           gpu_price=gpu_price, asic_price=asic_price, \
                           max_cap_a=max_cap_a, gpu_hashrate=gpu_hashrate, \
@@ -293,53 +283,10 @@ def panel_sim(p=[], which=None, **kwargs):
                                     x + '_aa_{}'.format(i)), how='outer')
             print('Ran sim for {} - value {}'.format(which, i))
     # etc.
+    # TODO: FINISH THIS FUNCTION
     #if which == '':
 
     return tr
-
-testpanel = panel_sim(p=[0.01, 0.05, 0.1, 0.15, 0.2, 0.25], which='aas', n=1000, alloc='uniform', aa=0.1, ag=0.3, an=0.6, pop_n=100000, gpu_price=p_g, asic_price=p_a, max_cap_a=max_cap_a, gpu_hashrate=g_hr, asic_hashrate=a_hr)
-
-testpanel2 = panel_sim(p=[0.01, 0.05, 0.1, 0.15, 0.2, 0.25], which='aas', n=500, alloc='uniform', aa=0.1, ag=0.3, an=0.6, pop_n=10000, gpu_price=p_g, asic_price=p_a, max_cap_a=max_cap_a, gpu_hashrate=g_hr, asic_hashrate=a_hr)
-
-testpanel.to_csv('C:/Users/cloud/Desktop/testpanel.csv')
-# need to reshape this to something that can be plotted easily in 3D
-d = {}
-suf = ['0.01', '0.05', '0.1', '0.15', '0.2', '0.25']
-for s in suf:
-    d[float(s)] = testpanel[[col for col in testpanel if col.endswith(s)]]
-    # this doesn't actually help - no .plot() method for panels
-
-surf = pd.DataFrame()
-x = [0.01, 0.05, 0.1, 0.15, 0.2, 0.25]
-'''
-y = list(testpanel.index)
-j = 0
-for xi in x:
-    for yi in y:
-        z = testpanel[[col for col in testpanel if col.endswith(str(xi))]]
-        z = list(z[z.columns[0]].values)
-        for zi in z:
-            surf.loc[j, 'x'] = xi
-            surf.loc[j, 'y'] = yi
-            surf.loc[j, 'z'] = zi
-            j += 1
-'''
-for xi in x:
-    col = [col for col in testpanel if col.endswith(str(xi))]
-    temp = testpanel[col]
-    temp['x'] = temp.index
-    temp['y'] = xi
-    temp.rename(columns={col[0]: 'z'}, inplace=True)
-    temp.index = range(len(temp))
-    surf = surf.append(temp)
-
-
-from mpl_toolkits.mplot3d import Axes3D
-from matplotlib import cm
-fig = plt.figure()
-ax = Axes3D(fig)
-test = ax.plot_trisurf(surf['x'], surf['y'], surf['z'], cmap=cm.jet, linewidth=0.2)
-# what this seems to show is that if NOBODY has an ASIC, decentralization is "better" (whatever that means), but if ANYONE has an ASIC, decentralization "improves" the more that other miners also have them
 
 # there is a less dumb way to do this, but this should work OK
 def recalc_pcts(aa=None, ag=None, an=None):
@@ -376,3 +323,54 @@ def recalc_pcts(aa=None, ag=None, an=None):
             assert (ag + an) <= 1
             aa = 1 - (ag + an)
             return aa, ag, an
+
+def plot_surface(df, pcts):
+    '''
+    Plot the output of a panel simulation in 3D.
+    '''
+    surf = pd.DataFrame()
+    for p in pcts:
+        col = [col for col in df if col.endswith(str(p))][0]
+        temp = df[col]
+        temp['x'] = temp.index
+        temp['y'] = p
+        temp.rename(columns={col: 'z'}, inplace=True)
+        temp.index = range(len(temp))
+        surf = surf.append(temp)
+    surf.index = range(len(surf))
+
+    fig = plt.figure()
+    ax = Axes3D(fig)
+    plot = ax.plot_trisurf(surf['x'], surf['y'], surf['z'], cmap=cm.jet, \
+                           linewidth=0.2)
+    return plot
+
+
+#============#
+# Simulation #
+#============#
+
+'''
+Simulation might proceeed something like as follows:
+
+- sample capital distributions for all nodes in AA, AG
+- sample initially participating miners to get M = A + G
+- calculate hashpower per miner based on allocated capital (either use full distribution from step 1, or sample capital commitment within allowable bounds, e.g. a node selected for set A must commit enough capital to buy at least 1 ASIC)
+- calculate an HHI-style scale of % of nodes controlling % of hashpower
+
+run this simulation across a grid of parameters for differing distributions / hashrate indices / participation rates and see if there is a way to cleanly visualize the results (can use multiple graphs as needed)
+'''
+
+#testsim = run_sim(n=1000, aa=0.1, ag=0.3, an=0.6, pop_n=100000, gpu_price=p_g, asic_price=p_a, max_cap_a=max_cap_a, gpu_hashrate=g_hr, asic_hashrate=a_hr)
+
+#testpanel = panel_sim(p=[0.01, 0.05, 0.1, 0.15, 0.2, 0.25], which='aas', n=1000, alloc='uniform', aa=0.1, ag=0.3, an=0.6, pop_n=100000, gpu_price=p_g, asic_price=p_a, max_cap_a=max_cap_a, gpu_hashrate=g_hr, asic_hashrate=a_hr)
+
+pcts = [0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
+
+testpanel = panel_sim(p=pcts, which='aas', n=500, alloc='uniform', aa=0, ag=1, an=0, pop_n=10000, gpu_price=p_g, asic_price=p_a, max_cap_a=max_cap_a, gpu_hashrate=g_hr, asic_hashrate=a_hr)
+
+testpanel.to_csv('C:/Users/cloud/Desktop/testpanel_AA.csv')
+
+plot_surface(testpanel, pcts=pcts)
+
+# what this seems to show is that if NOBODY has an ASIC, decentralization is "better" (whatever that means), but if ANYONE has an ASIC, decentralization "improves" the more that other miners also have them
