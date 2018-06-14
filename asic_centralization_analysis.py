@@ -6,6 +6,7 @@
 
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib import cm
 
@@ -331,7 +332,7 @@ def plot_surface(df, pcts):
     surf = pd.DataFrame()
     for p in pcts:
         col = [col for col in df if col.endswith(str(p))][0]
-        temp = df[col]
+        temp = df[[col]]
         temp['x'] = temp.index
         temp['y'] = p
         temp.rename(columns={col: 'z'}, inplace=True)
