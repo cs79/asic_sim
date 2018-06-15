@@ -47,8 +47,8 @@ an = 0.6  # percentage of non-miners who could access neither ASICs nor GPUs
 assert aa + ag + an == 1
 
 # N.B. hashrates can be indexed rather than real rates
-a_hr = 250  # ASIC hashrate - placeholder, not realistic
-g_hr = 100  # GPU hashrate
+a_hr = 28000  # ASIC hashrate - using ~14,000 Mh/s as base
+g_hr = 100  # GPU hashrate - using 50 Mh/s as a generous base
 
 '''
 Maybe instead of fixing A, G from the start, have a distribution over participation rates for sampling people from AA, AG and have initial NM == world population
@@ -60,14 +60,14 @@ participation_rate_g = 0.15
 # A = {sample(AA, participation_rate_a)}
 # G = {sample(AG, participation_rate_g)}
 
-# Minimum buy-in prices (not realistic)
-p_a = 11000
-p_g = 600
+# Minimum buy-in prices
+p_a = 3000  # e.g. AntMiner S9, Avalon821, Ebit E9++
+p_g = 600   # e.g. Nvidia GTX 1070, AMD R9 295X2
 
 # Maximum assumed capital that an individual would devote to miners
 # N.B. these could again be sampled per-node from some distribution
 max_cap_a = 100000
-max_cap_g = p_a - 1
+max_cap_g = p_a - 1  # unused; set to p_a below
 
 
 #=========#
@@ -79,7 +79,7 @@ class Miner:
         self.id             = kwargs.get('id', None)
         self.capital        = kwargs.get('capital', None)
         self.access         = kwargs.get('access', None)
-        self.participating  = kwargs.get('participating', False)
+        self.participating  = kwargs.get('participating', False)  # unused atm
         self.hardware_units = kwargs.get('hardware_units', 0)
         self.hashpower      = kwargs.get('hashpower', None)
         self.spent          = kwargs.get('spent', 0)
@@ -173,7 +173,6 @@ def sample_initial_pop(aa, ag, an, pop_n, gpu_price, asic_price, max_cap_a):
     return list(AA), list(AG)
 
 # calculate concentration under assumption of all particpating, or sample participating
-# TODO: fix this - does not work for some values
 def get_concentration(miners):
     '''
     Calculates cumulative percentage of miners that control cumulative percentage of network hashpower.
@@ -185,7 +184,6 @@ def get_concentration(miners):
     hps['cumpct_hp'] = hps['hashpower'].cumsum() / hps['hashpower'].sum()
     hps['cumpct_m'] = [i / len(hps) for i in list(range(len(hps)))]
     cumpct = hps[['cumpct_m', 'cumpct_hp']]
-    #cumpct.set_index('cumpct_m', inplace=True)  # maybe
     simple = pd.DataFrame()
     # approximation rather than relying on calculation of exact pcts
     grid = [i/100 for i in list(range(1,100))] + [1.0]
@@ -195,19 +193,15 @@ def get_concentration(miners):
         if pct_m < grid[j]:
             i += 1
         else:
-            #print('i: {}\n\nj: {}'.format(i, j))
             simple.loc[grid[j], 'cumpct_hp'] = cumpct.loc[cumpct.index[i], 'cumpct_hp']
             j += 1
-    #for i in [j/100 for j in list(range(1,100))]:
-    #    simple.loc[i, 'cumpct_hp'] = cumpct.loc[i, 'cumpct_hp']
     return simple
-
-
-
-# run get_concentration on various parameterizations / averages across samplings of the same parmeterization i guess, and then combine them into surfaces of mining concentration based on changes in those parameters (average scenario per parameterization makes the most sense, I guess)
 
 def run_sim(n=10000, alloc='uniform', avg_result=True, **kwargs):
     '''
+    Runs simulations of mining concentration based on miner capital allocation.
+    Concentration is measured as % hashpower controlled by % miners.
+    If avg_result is True, will return the averaged vector of concentrations.
     '''
     tr =[]
     gpu_price = kwargs.get('gpu_price')
@@ -268,10 +262,8 @@ def panel_sim(p=[], which=None, **kwargs):
     max_cap_a       = kwargs.get('max_cap_a', None)
     gpu_hashrate    = kwargs.get('gpu_hashrate', None)
     asic_hashrate   = kwargs.get('asic_hashrate', None)
-
-    tr = pd.DataFrame()
-
     # big dumb switch for now until I can figure out a clever way to do this
+    tr = pd.DataFrame()
     if which == 'aas':
         for i in p:
             # keep an value constant (at 0) - eventually factor an out
@@ -283,10 +275,53 @@ def panel_sim(p=[], which=None, **kwargs):
             tr = tr.join(sim.rename(columns=lambda x: \
                                     x + '_aa_{}'.format(i)), how='outer')
             print('Ran sim for {} - value {}'.format(which, i))
-    # etc.
-    # TODO: FINISH THIS FUNCTION
-    #if which == '':
-
+    if which == 'ags':
+        # this case may be redundant with aas if running a full panel of pcts
+        for i in p:
+            aa, ag, an = recalc_pcts(ag=i, an=an)
+            sim = run_sim(n=n, alloc=alloc, aa=aa, ag=i, an=an, pop_n=pop_n, \
+                          gpu_price=gpu_price, asic_price=asic_price, \
+                          max_cap_a=max_cap_a, gpu_hashrate=gpu_hashrate, \
+                          asic_hashrate=asic_hashrate)
+            tr = tr.join(sim.rename(columns=lambda x: \
+                                    x + '_ag_{}'.format(i)), how='outer')
+            print('Ran sim for {} - value {}'.format(which, i))
+    if which == 'a_hrs':
+        for i in p:
+            sim = run_sim(n=n, alloc=alloc, aa=aa, ag=ag, an=an, pop_n=pop_n, \
+                          gpu_price=gpu_price, asic_price=asic_price, \
+                          max_cap_a=max_cap_a, gpu_hashrate=gpu_hashrate, \
+                          asic_hashrate=i)
+            tr = tr.join(sim.rename(columns=lambda x: \
+                                    x + '_a_hr_{}'.format(i)), how='outer')
+            print('Ran sim for {} - value {}'.format(which, i))
+    if which == 'p_gs':
+        for i in p:
+            sim = run_sim(n=n, alloc=alloc, aa=aa, ag=ag, an=an, pop_n=pop_n, \
+                          gpu_price=i, asic_price=asic_price, \
+                          max_cap_a=max_cap_a, gpu_hashrate=gpu_hashrate, \
+                          asic_hashrate=asic_hashrate)
+            tr = tr.join(sim.rename(columns=lambda x: \
+                                    x + '_p_g_{}'.format(i)), how='outer')
+            print('Ran sim for {} - value {}'.format(which, i))
+    if which == 'p_as':
+        for i in p:
+            sim = run_sim(n=n, alloc=alloc, aa=aa, ag=ag, an=an, pop_n=pop_n, \
+                          gpu_price=gpu_price, asic_price=i, \
+                          max_cap_a=max_cap_a, gpu_hashrate=gpu_hashrate, \
+                          asic_hashrate=asic_hashrate)
+            tr = tr.join(sim.rename(columns=lambda x: \
+                                    x + '_p_a_{}'.format(i)), how='outer')
+            print('Ran sim for {} - value {}'.format(which, i))
+    if which == 'mc_as':
+        for i in p:
+            sim = run_sim(n=n, alloc=alloc, aa=aa, ag=ag, an=an, pop_n=pop_n, \
+                          gpu_price=gpu_price, asic_price=asic_price, \
+                          max_cap_a=i, gpu_hashrate=gpu_hashrate, \
+                          asic_hashrate=asic_hashrate)
+            tr = tr.join(sim.rename(columns=lambda x: \
+                                    x + '_mc_a_{}'.format(i)), how='outer')
+            print('Ran sim for {} - value {}'.format(which, i))
     return tr
 
 # there is a less dumb way to do this, but this should work OK
@@ -361,10 +396,6 @@ Simulation might proceeed something like as follows:
 
 run this simulation across a grid of parameters for differing distributions / hashrate indices / participation rates and see if there is a way to cleanly visualize the results (can use multiple graphs as needed)
 '''
-
-#testsim = run_sim(n=1000, aa=0.1, ag=0.3, an=0.6, pop_n=100000, gpu_price=p_g, asic_price=p_a, max_cap_a=max_cap_a, gpu_hashrate=g_hr, asic_hashrate=a_hr)
-
-#testpanel = panel_sim(p=[0.01, 0.05, 0.1, 0.15, 0.2, 0.25], which='aas', n=1000, alloc='uniform', aa=0.1, ag=0.3, an=0.6, pop_n=100000, gpu_price=p_g, asic_price=p_a, max_cap_a=max_cap_a, gpu_hashrate=g_hr, asic_hashrate=a_hr)
 
 pcts = [0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
 
