@@ -368,9 +368,9 @@ def plot_surface(df, pcts):
     for p in pcts:
         col = [col for col in df if col.endswith(str(p))][0]
         temp = df[[col]]
-        temp['x'] = temp.index
-        temp['y'] = p
-        temp.rename(columns={col: 'z'}, inplace=True)
+        temp['x'] = p           # percent of miners with ASICs
+        temp['y'] = temp.index  # percent of miners (ordered)
+        temp.rename(columns={col: 'z'}, inplace=True)  # pct hashpow controlled
         temp.index = range(len(temp))
         surf = surf.append(temp)
     surf.index = range(len(surf))
@@ -379,6 +379,10 @@ def plot_surface(df, pcts):
     ax = Axes3D(fig)
     plot = ax.plot_trisurf(surf['x'], surf['y'], surf['z'], cmap=cm.jet, \
                            linewidth=0.2)
+    ax.set_xlabel('% of miners with ASICs')
+    ax.set_ylabel('% of miners controlling')
+    ax.set_zlabel('% of hashpower controlled')
+
     return plot
 
 
